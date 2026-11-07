@@ -3203,32 +3203,61 @@ class ChatOpenAI(BaseChatOpenAI):  # type: ignore[override]
 
         !!! example "Foundry Local example"
 
+            Install `foundry-local-sdk==2.3.1` and `langchain-openai`. This follows
+            the Foundry Local [web-server sample](https://github.com/microsoft/Foundry-Local/blob/v2.3.1/samples/python/web-server/src/app.py).
+
             ```python
             from foundry_local_sdk import Configuration, FoundryLocalManager
             from langchain_openai import ChatOpenAI
 
-            FoundryLocalManager.initialize(
+            manager = FoundryLocalManager(
                 Configuration(app_name="langchain-foundry-local")
             )
-            manager = FoundryLocalManager.instance
+            foundry_model = None
+            server_started = False
+            try:
+                ep_result = manager.download_and_register_eps()
+                if not ep_result.success:
+                    raise RuntimeError(
+                        f"Execution provider registration failed: {ep_result.failed_eps}"
+                    )
 
-            foundry_model = manager.catalog.get_model("qwen2.5-0.5b")
-            foundry_model.download()
-            foundry_model.load()
-            manager.start_web_service()
+                foundry_model = manager.catalog.get_model("qwen2.5-0.5b")
+                if foundry_model is None:
+                    raise RuntimeError(
+                        "Model 'qwen2.5-0.5b' was not found in the catalog."
+                    )
+                if not foundry_model.is_cached:
+                    foundry_model.download()
+                foundry_model.load()
 
-            model = ChatOpenAI(
-                base_url=f"{manager.urls[0].rstrip('/')}/v1",
-                api_key="not-needed",
-                model=foundry_model.id,
-                temperature=0,
-            )
+                manager.start_web_service()
+                server_started = True
+                if not manager.urls:
+                    raise RuntimeError(
+                        "The web server started without reporting a URL."
+                    )
+                server_url = manager.urls[0].rstrip("/")
+
+                model = ChatOpenAI(
+                    base_url=f"{server_url}/v1",
+                    api_key="not-needed",
+                    model=foundry_model.id,
+                    temperature=0,
+                )
+                print(model.invoke("What is the golden ratio?").content)
+            finally:
+                if server_started:
+                    manager.stop_web_service()
+                if foundry_model is not None and foundry_model.is_loaded:
+                    foundry_model.unload()
+                manager.close()
             ```
 
             Foundry Local itself is SDK-first and does not need to run as a web
             server unless you are plugging it into an OpenAI-compatible HTTP client
             like `ChatOpenAI`. This example uses the optional local `/v1` endpoint
-            only for that compatibility layer. Foundry Local 1.2 serves both Chat
+            only for that compatibility layer. Foundry Local 2.3.1 serves both Chat
             Completions and the OpenAI Responses API from the same local `/v1`
             endpoint, so `ChatOpenAI` features that opt into Responses
             (`use_responses_api=True`, `output_version="responses/v1"`, and related
